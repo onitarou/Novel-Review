@@ -1,0 +1,18 @@
+{
+  "name": "novel-circle-share",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node src/server.mjs",
+    "dev:watch": "node --watch src/server.mjs",
+    "start": "node src/server.mjs",
+    "test": "node src/markup.test.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.17.3"
+  }
+}
