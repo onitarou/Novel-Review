@@ -404,7 +404,6 @@ function renderAdminLogin(req, res) {
           <input type="password" name="password" autocomplete="current-password" required autofocus>
         </label>
         <button class="primary" type="submit">ログイン</button>
-        <p class="muted">開発用初期パスワードは <code>novel-admin</code> です。</p>
       </form>
     </section>
   `));
