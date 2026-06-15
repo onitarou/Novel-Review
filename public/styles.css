@@ -484,6 +484,11 @@ pre {
 
 .story-body-content {
   display: block;
+  hanging-punctuation: allow-end;
+  line-break: strict;
+  overflow-wrap: normal;
+  text-spacing-trim: normal;
+  word-break: normal;
 }
 
 .line-gap {
@@ -770,6 +775,17 @@ button.danger:hover {
   min-width: max-content;
   text-align: start;
   writing-mode: vertical-rl;
+}
+
+.reader-shell.vertical.needs-hanging-punctuation-fallback .story-body-content {
+  line-break: anywhere;
+}
+
+.reader-shell.vertical.needs-hanging-punctuation-fallback .story-body-content .hanging-punctuation-fallback {
+  display: inline-block;
+  margin-inline-end: -1em;
+  position: relative;
+  z-index: 1;
 }
 
 .theme-dark {

@@ -2,6 +2,12 @@
   const shell = document.querySelector("[data-reader-shell]");
   const storyBody = document.querySelector("[data-story-body]");
   if (!shell || !storyBody) return;
+  const storyContent = storyBody.querySelector(".story-body-content");
+  const supportsNativeHangingPunctuation =
+    typeof CSS !== "undefined" && CSS.supports?.("hanging-punctuation", "allow-end");
+  const hangingPunctuationPattern = /^[、。，．｡､,，.．]$/u;
+  let hangingPunctuationFrame = 0;
+  let hangingPunctuationResizeObserver = null;
 
   setupConfirmForms();
 
@@ -13,6 +19,7 @@
     theme: "light"
   };
   const prefs = { ...defaults, ...readJson("novel_reader_prefs") };
+  shell.classList.toggle("needs-hanging-punctuation-fallback", !supportsNativeHangingPunctuation);
 
   const controls = document.querySelectorAll("[data-pref]");
   for (const control of controls) {
@@ -25,6 +32,12 @@
     });
   }
   applyPrefs(prefs);
+  window.addEventListener("resize", scheduleHangingPunctuationFallback);
+  document.fonts?.ready?.then(scheduleHangingPunctuationFallback);
+  if (storyContent && "ResizeObserver" in window) {
+    hangingPunctuationResizeObserver = new ResizeObserver(scheduleHangingPunctuationFallback);
+    hangingPunctuationResizeObserver.observe(storyBody);
+  }
 
   const nameInput = document.querySelector("[data-reader-name]");
   if (nameInput) {
@@ -234,6 +247,58 @@
         storyBody.scrollLeft = storyBody.scrollWidth;
       });
     }
+    scheduleHangingPunctuationFallback();
+  }
+
+  function scheduleHangingPunctuationFallback() {
+    if (hangingPunctuationFrame) cancelAnimationFrame(hangingPunctuationFrame);
+    hangingPunctuationFrame = requestAnimationFrame(applyHangingPunctuationFallback);
+  }
+
+  function applyHangingPunctuationFallback() {
+    hangingPunctuationFrame = 0;
+    if (!storyContent) return;
+
+    for (const node of storyContent.querySelectorAll(".hanging-punctuation-fallback")) {
+      node.classList.remove("hanging-punctuation-fallback");
+    }
+
+    if (supportsNativeHangingPunctuation || !shell.classList.contains("vertical")) return;
+
+    const nodes = Array.from(storyContent.querySelectorAll("[data-offset]:not([data-newline])"));
+    if (nodes.length < 2) return;
+
+    void storyContent.offsetHeight;
+    const contentRect = storyContent.getBoundingClientRect();
+    const lineStartLimit = contentRect.top + 2;
+
+    for (let index = 1; index < nodes.length; index += 1) {
+      const node = nodes[index];
+      if (!hangingPunctuationPattern.test(node.textContent || "")) continue;
+
+      const previous = nodes[index - 1];
+      if (!isAdjacentOffset(previous, node)) continue;
+
+      const rect = node.getBoundingClientRect();
+      const previousRect = previous.getBoundingClientRect();
+      const isNextColumn = rect.left < previousRect.left - 1;
+      const isAtLineStart = rect.top <= lineStartLimit;
+
+      if (isNextColumn && isAtLineStart) {
+        node.classList.add("hanging-punctuation-fallback");
+        void node.offsetHeight;
+      }
+    }
+  }
+
+  function isAdjacentOffset(previous, current) {
+    const previousStart = Number(previous.dataset.offset);
+    const previousLength = Number(previous.dataset.length || "1");
+    const currentStart = Number(current.dataset.offset);
+    return Number.isFinite(previousStart)
+      && Number.isFinite(previousLength)
+      && Number.isFinite(currentStart)
+      && previousStart + previousLength === currentStart;
   }
 
   function readJson(key) {
