@@ -10,6 +10,7 @@
   let hangingPunctuationResizeObserver = null;
 
   setupConfirmForms();
+  setupMobilePanels();
 
   const defaults = {
     orientation: "horizontal",
@@ -227,6 +228,57 @@
           event.preventDefault();
         }
       });
+    }
+  }
+
+  function setupMobilePanels() {
+    const menuToggle = document.querySelector("[data-reader-menu-toggle]");
+    const menuClose = document.querySelector("[data-reader-menu-close]");
+    const overlay = document.querySelector("[data-reader-overlay]");
+    const settingsToggle = document.querySelector("[data-reader-settings-toggle]");
+    const mobileQuery = window.matchMedia("(max-width: 700px)");
+
+    const setMenuOpen = (isOpen) => {
+      shell.classList.toggle("mobile-nav-open", isOpen);
+      document.body.classList.toggle("reader-menu-open", isOpen);
+      menuToggle?.setAttribute("aria-expanded", String(isOpen));
+    };
+
+    const setSettingsOpen = (isOpen) => {
+      shell.classList.toggle("mobile-settings-open", isOpen);
+      settingsToggle?.setAttribute("aria-expanded", String(isOpen));
+    };
+
+    menuToggle?.addEventListener("click", () => {
+      setMenuOpen(!shell.classList.contains("mobile-nav-open"));
+    });
+    menuClose?.addEventListener("click", () => setMenuOpen(false));
+    overlay?.addEventListener("click", () => setMenuOpen(false));
+    settingsToggle?.addEventListener("click", () => {
+      setSettingsOpen(!shell.classList.contains("mobile-settings-open"));
+    });
+
+    for (const link of document.querySelectorAll("[data-reader-sidebar] a")) {
+      link.addEventListener("click", () => setMenuOpen(false));
+    }
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+        setSettingsOpen(false);
+      }
+    });
+
+    const handleMobileQueryChange = (event) => {
+      if (!event.matches) {
+        setMenuOpen(false);
+        setSettingsOpen(false);
+      }
+    };
+    if (mobileQuery.addEventListener) {
+      mobileQuery.addEventListener("change", handleMobileQueryChange);
+    } else {
+      mobileQuery.addListener(handleMobileQueryChange);
     }
   }
 

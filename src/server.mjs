@@ -814,13 +814,22 @@ async function renderReaderStory(req, res, url, token, share, storyId, readerId)
   renderHtml(res, 200, readerPage(story.title, `
     <div class="reader-shell horizontal" data-reader-shell>
       ${readerSidebar(token, stories, story.id)}
+      <button class="reader-mobile-overlay" type="button" data-reader-overlay aria-label="話一覧を閉じる"></button>
       <main class="reader-main">
+        <div class="reader-mobile-actions">
+          <button class="reader-icon-button" type="button" data-reader-menu-toggle aria-controls="reader-navigation" aria-expanded="false" aria-label="話一覧を開く">
+            <span aria-hidden="true">&#9776;</span>
+          </button>
+          <button class="reader-icon-button" type="button" data-reader-settings-toggle aria-controls="reader-controls" aria-expanded="false" aria-label="プレビュー設定を開く">
+            <span aria-hidden="true">&#9881;</span>
+          </button>
+        </div>
         <div class="reader-toolbar">
           <div>
             <p class="eyebrow">${escapeHtml(work.title)} / ver${version.version_number}</p>
             <h1>${escapeHtml(story.title)}</h1>
           </div>
-          <div class="reader-controls">
+          <div class="reader-controls" id="reader-controls" data-reader-controls>
             <label>組み
               <select data-pref="orientation">
                 <option value="horizontal">横書き</option>
@@ -902,8 +911,13 @@ function readerSidebar(token, stories, activeStoryId = null) {
   }).join("");
 
   return `
-    <aside class="reader-sidebar">
-      <a class="site-title" href="/s/${token}">小説共有</a>
+    <aside class="reader-sidebar" id="reader-navigation" data-reader-sidebar>
+      <div class="reader-sidebar-header">
+        <a class="site-title" href="/s/${token}">小説共有</a>
+        <button class="reader-sidebar-close" type="button" data-reader-menu-close aria-label="話一覧を閉じる">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
       <nav><ul>${items || `<li class="muted">公開中の話はありません。</li>`}</ul></nav>
     </aside>
   `;
