@@ -20,6 +20,7 @@
   --quote-bg: #f7f0df;
   --quote-ink: #685332;
   --quote-border: #c3a75c;
+  --ruby-ink: #6b5f50;
   --reader-font-size: 18px;
   --reader-line-height: 1.9;
   --paragraph-gap: 0rem;
@@ -525,7 +526,7 @@ pre {
 }
 
 .story-body rt {
-  color: #6b5f50;
+  color: var(--ruby-ink);
   font-size: 0.55em;
 }
 
@@ -830,6 +831,7 @@ button.danger:hover {
   --quote-bg: #302d25;
   --quote-ink: #f0dfb8;
   --quote-border: #9a7b43;
+  --ruby-ink: #eadfce;
   color-scheme: dark;
 }
 
@@ -850,6 +852,7 @@ button.danger:hover {
   --quote-bg: #f4ead2;
   --quote-ink: #685332;
   --quote-border: #b99b55;
+  --ruby-ink: #6f573c;
 }
 
 .theme-dark button.danger {
