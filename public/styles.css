@@ -943,11 +943,21 @@ button.danger:hover {
 
   .reader-toolbar {
     display: grid;
+    position: relative;
+    z-index: 45;
   }
 
   .reader-controls {
+    box-shadow: 0 0.6rem 1.4rem rgba(37, 35, 31, 0.18);
     display: none;
     grid-template-columns: 1fr;
+    max-height: min(70vh, 30rem);
+    overflow: auto;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.5rem);
+    width: min(100%, 22rem);
+    z-index: 55;
   }
 
   .reader-shell.mobile-settings-open .reader-controls {
