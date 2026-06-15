@@ -915,7 +915,7 @@ button.danger:hover {
   }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 1024px) {
   body.reader-menu-open {
     overflow: hidden;
   }

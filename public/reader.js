@@ -236,7 +236,7 @@
     const menuClose = document.querySelector("[data-reader-menu-close]");
     const overlay = document.querySelector("[data-reader-overlay]");
     const settingsToggle = document.querySelector("[data-reader-settings-toggle]");
-    const mobileQuery = window.matchMedia("(max-width: 700px)");
+    const mobileQuery = window.matchMedia("(max-width: 1024px)");
 
     const setMenuOpen = (isOpen) => {
       shell.classList.toggle("mobile-nav-open", isOpen);
