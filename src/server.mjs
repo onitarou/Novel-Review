@@ -816,16 +816,16 @@ async function renderReaderStory(req, res, url, token, share, storyId, readerId)
       ${readerSidebar(token, stories, story.id)}
       <button class="reader-mobile-overlay" type="button" data-reader-overlay aria-label="話一覧を閉じる"></button>
       <main class="reader-main">
-        <div class="reader-mobile-actions">
-          <button class="reader-icon-button" type="button" data-reader-menu-toggle aria-controls="reader-navigation" aria-expanded="false" aria-label="話一覧を開く">
-            <span aria-hidden="true">&#9776;</span>
-          </button>
-          <button class="reader-icon-button" type="button" data-reader-settings-toggle aria-controls="reader-controls" aria-expanded="false" aria-label="プレビュー設定を開く">
-            <span aria-hidden="true">&#9881;</span>
-          </button>
-        </div>
         <div class="reader-toolbar">
-          <div>
+          <div class="reader-mobile-actions">
+            <button class="reader-icon-button" type="button" data-reader-menu-toggle aria-controls="reader-navigation" aria-expanded="false" aria-label="話一覧を開く">
+              <span aria-hidden="true">&#9776;</span>
+            </button>
+            <button class="reader-icon-button" type="button" data-reader-settings-toggle aria-controls="reader-controls" aria-expanded="false" aria-label="プレビュー設定を開く">
+              <span aria-hidden="true">&#9881;</span>
+            </button>
+          </div>
+          <div class="reader-heading">
             <p class="eyebrow">${escapeHtml(work.title)} / ver${version.version_number}</p>
             <h1>${escapeHtml(story.title)}</h1>
           </div>

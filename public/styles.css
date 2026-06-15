@@ -470,6 +470,10 @@ pre {
   margin-bottom: 1rem;
 }
 
+.reader-heading {
+  min-width: 0;
+}
+
 .reader-controls {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -925,13 +929,7 @@ button.danger:hover {
   }
 
   .reader-mobile-actions {
-    display: flex;
-    gap: 0.5rem;
-    justify-content: flex-end;
-    margin-bottom: 0.75rem;
-    position: sticky;
-    top: 0.5rem;
-    z-index: 35;
+    display: contents;
   }
 
   .reader-icon-button {
@@ -942,9 +940,29 @@ button.danger:hover {
   }
 
   .reader-toolbar {
+    align-items: start;
     display: grid;
+    gap: 0.65rem;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     position: relative;
     z-index: 45;
+  }
+
+  .reader-toolbar [data-reader-menu-toggle] {
+    grid-column: 1;
+    grid-row: 1;
+    justify-self: start;
+  }
+
+  .reader-toolbar .reader-heading {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .reader-toolbar [data-reader-settings-toggle] {
+    grid-column: 3;
+    grid-row: 1;
+    justify-self: end;
   }
 
   .reader-controls {
