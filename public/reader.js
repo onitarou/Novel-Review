@@ -61,13 +61,14 @@
     body: form.querySelector("[data-comment-body]")
   })).filter((target) => target.preview && target.body);
   let selectedQuote = emptyQuote();
+  let selectionCaptureTimer = 0;
   const plainText = storyBody.dataset.plain || "";
 
   const captureSelection = () => {
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
     const range = selection.getRangeAt(0);
-    if (!storyBody.contains(range.commonAncestorContainer)) return;
+    if (!isStorySelection(range)) return;
 
     const segments = [];
     for (const node of storyBody.querySelectorAll("[data-offset]")) {
@@ -102,8 +103,11 @@
     updateQuoteTargets();
   };
 
-  storyBody.addEventListener("mouseup", () => setTimeout(captureSelection, 0));
-  storyBody.addEventListener("keyup", () => setTimeout(captureSelection, 0));
+  storyBody.addEventListener("mouseup", () => scheduleSelectionCapture());
+  storyBody.addEventListener("pointerup", () => scheduleSelectionCapture());
+  storyBody.addEventListener("touchend", () => scheduleSelectionCapture(240), { passive: true });
+  storyBody.addEventListener("keyup", () => scheduleSelectionCapture());
+  document.addEventListener("selectionchange", () => scheduleSelectionCapture(120));
   for (const target of quoteTargets) {
     target.insertButton?.addEventListener("click", () => {
       insertQuoteIntoDraft(target);
@@ -229,6 +233,20 @@
         }
       });
     }
+  }
+
+  function scheduleSelectionCapture(delay = 0) {
+    if (selectionCaptureTimer) clearTimeout(selectionCaptureTimer);
+    selectionCaptureTimer = setTimeout(() => {
+      selectionCaptureTimer = 0;
+      captureSelection();
+    }, delay);
+  }
+
+  function isStorySelection(range) {
+    return storyBody.contains(range.commonAncestorContainer)
+      || storyBody.contains(range.startContainer)
+      || storyBody.contains(range.endContainer);
   }
 
   function setupMobilePanels() {
