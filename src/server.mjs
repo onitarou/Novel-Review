@@ -799,12 +799,22 @@ async function renderReaderWork(req, res, token, share) {
   const work = await getWork(share.work_id);
   const stories = await listStoriesForReader(share.work_id);
   renderHtml(res, 200, readerPage(work.title, `
-    <div class="reader-shell horizontal">
+    <div class="reader-shell horizontal" data-reader-shell>
       ${readerSidebar(token, stories)}
+      <button class="reader-mobile-overlay" type="button" data-reader-overlay aria-label="話一覧を閉じる"></button>
       <main class="reader-main">
         <section class="work-intro">
-          <p class="eyebrow">Shared work</p>
-          <h1>${escapeHtml(work.title)}</h1>
+          <div class="reader-toolbar reader-work-toolbar">
+            <div class="reader-mobile-actions">
+              <button class="reader-icon-button" type="button" data-reader-menu-toggle aria-controls="reader-navigation" aria-expanded="false" aria-label="話一覧を開く">
+                <span aria-hidden="true">&#9776;</span>
+              </button>
+            </div>
+            <div class="reader-heading">
+              <p class="eyebrow">Shared work</p>
+              <h1>${escapeHtml(work.title)}</h1>
+            </div>
+          </div>
           <div class="intro-grid">
             <section>
               <h2>あらすじ</h2>
@@ -818,6 +828,7 @@ async function renderReaderWork(req, res, token, share) {
         </section>
       </main>
     </div>
+    <script src="/reader.js" defer></script>
   `, req, res));
 }
 

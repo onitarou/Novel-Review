@@ -1,16 +1,19 @@
 (() => {
   const shell = document.querySelector("[data-reader-shell]");
+  if (!shell) return;
+
+  setupConfirmForms();
+  setupMobilePanels();
+
   const storyBody = document.querySelector("[data-story-body]");
-  if (!shell || !storyBody) return;
+  if (!storyBody) return;
+
   const storyContent = storyBody.querySelector(".story-body-content");
   const supportsNativeHangingPunctuation =
     typeof CSS !== "undefined" && CSS.supports?.("hanging-punctuation", "allow-end");
   const hangingPunctuationPattern = /^[、。，．｡､,，.．]$/u;
   let hangingPunctuationFrame = 0;
   let hangingPunctuationResizeObserver = null;
-
-  setupConfirmForms();
-  setupMobilePanels();
 
   const defaults = {
     orientation: "horizontal",
