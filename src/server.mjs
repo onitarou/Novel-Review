@@ -44,19 +44,36 @@ import {
 } from "./db.mjs";
 import { escapeHtml, renderNovelMarkup } from "./markup.mjs";
 
+const NODE_ENV = process.env.NODE_ENV || "development";
+const IS_PRODUCTION = NODE_ENV === "production";
 const PORT = Number(process.env.PORT || 3000);
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "novel-admin";
-const APP_SECRET = process.env.APP_SECRET || "dev-secret-change-me";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (IS_PRODUCTION ? "" : "novel-admin");
+const APP_SECRET = process.env.APP_SECRET || (IS_PRODUCTION ? "" : "dev-secret-change-me");
+const PUBLIC_ORIGIN = normalizePublicOrigin(process.env.PUBLIC_ORIGIN || "");
+const ADMIN_SESSION_MAX_AGE = 60 * 60 * 12;
+const CSRF_COOKIE_NAME = "csrf_seed";
+const CSRF_MAX_AGE = 60 * 60 * 24 * 7;
+const READER_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 const publicDir = path.join(process.cwd(), "public");
 
+assertRuntimeConfig();
 await initDb();
 
 const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const pathname = decodeURIComponent(url.pathname);
+  let pathname = "";
 
   try {
+    const url = new URL(req.url, "http://localhost");
+    pathname = decodeURIComponent(url.pathname);
+
     if (await serveStatic(pathname, res)) return;
+
+    if (req.method === "POST") {
+      const form = await readForm(req);
+      if (!verifyCsrf(req, form)) {
+        return forbidden(res, "フォームの有効期限が切れた可能性があります。ページを再読み込みしてから再度お試しください。");
+      }
+    }
 
     if (req.method === "GET" && pathname === "/") {
       redirect(res, "/admin/works");
@@ -69,7 +86,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/admin/logout" && req.method === "POST") {
-      addCookie(res, "admin_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax");
+      addCookie(res, cookieHeader(req, "admin_session", "", { maxAge: 0, httpOnly: true }));
       redirect(res, "/admin/login");
       return;
     }
@@ -88,12 +105,15 @@ const server = http.createServer(async (req, res) => {
 
     notFound(res);
   } catch (error) {
-    console.error(error);
+    console.error("Unhandled request error", {
+      method: req.method,
+      path: pathname,
+      error
+    });
     renderHtml(res, 500, page("エラー", `
       <section class="panel">
         <h1>エラー</h1>
         <p>処理中に問題が発生しました。</p>
-        <pre>${escapeHtml(error.stack || error.message)}</pre>
       </section>
     `));
   }
@@ -101,7 +121,6 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Novel circle share app running at http://localhost:${PORT}`);
-  console.log(`Admin password: ${ADMIN_PASSWORD}`);
   console.log(`Sample reader URL: http://localhost:${PORT}/s/sample-share`);
 });
 
@@ -128,10 +147,11 @@ async function routeAdmin(req, res, url, pathname) {
 
   if (req.method === "GET" && pathname === "/admin/export") {
     const snapshot = await exportSnapshot();
-    res.writeHead(200, {
+    res.writeHead(200, securityHeaders({
       "Content-Type": "application/json; charset=utf-8",
-      "Content-Disposition": `attachment; filename="novel-share-backup-${Date.now()}.json"`
-    });
+      "Content-Disposition": `attachment; filename="novel-share-backup-${Date.now()}.json"`,
+      "Cache-Control": "no-store"
+    }));
     res.end(JSON.stringify(snapshot, null, 2));
     return;
   }
@@ -406,13 +426,16 @@ function renderAdminLogin(req, res) {
         <button class="primary" type="submit">ログイン</button>
       </form>
     </section>
-  `));
+  `, "", req, res));
 }
 
 async function handleAdminLogin(req, res) {
   const form = await readForm(req);
   if (form.get("password") === ADMIN_PASSWORD) {
-    addCookie(res, `admin_session=${makeAdminSession()}; Path=/; HttpOnly; SameSite=Lax`);
+    addCookie(res, cookieHeader(req, "admin_session", makeAdminSession(), {
+      maxAge: ADMIN_SESSION_MAX_AGE,
+      httpOnly: true
+    }));
     redirect(res, "/admin/works");
     return;
   }
@@ -474,7 +497,7 @@ async function renderAdminWorks(req, res) {
         <tbody>${rows || `<tr><td colspan="4">作品がありません。</td></tr>`}</tbody>
       </table>
     </section>
-  `));
+  `, req, res));
 }
 
 async function renderAdminWork(req, res, workId, url) {
@@ -485,8 +508,8 @@ async function renderAdminWork(req, res, workId, url) {
   const stories = await listStoriesForAdmin(workId);
   const comments = await listCommentsForAdmin({ workId });
   const activeShare = await getActiveShareLink(workId);
-  const shareToken = url.searchParams.get("shareToken");
-  const origin = `http://${req.headers.host}`;
+  const shareToken = normalizeShareToken(url.searchParams.get("shareToken"));
+  const issuedShareUrl = shareToken ? publicUrl(`/s/${encodeURIComponent(shareToken)}`) : "";
   const chapterOptions = chapters.map((chapter) => (
     `<option value="${chapter.id}">${escapeHtml(chapter.title)}</option>`
   )).join("");
@@ -513,7 +536,7 @@ async function renderAdminWork(req, res, workId, url) {
     ${shareToken ? `
       <section class="notice">
         <strong>共有URLを発行しました。</strong>
-        <a href="${origin}/s/${shareToken}" target="_blank">${origin}/s/${shareToken}</a>
+        <a href="${escapeAttr(issuedShareUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(issuedShareUrl)}</a>
       </section>
     ` : ""}
 
@@ -597,7 +620,7 @@ async function renderAdminWork(req, res, workId, url) {
         showWork: false
       })}
     </section>
-  `));
+  `, req, res));
 }
 
 async function renderAdminStory(req, res, storyId, url) {
@@ -695,7 +718,7 @@ async function renderAdminStory(req, res, storyId, url) {
         showStory: false
       })}
     </section>
-  `));
+  `, req, res));
 }
 
 async function renderAdminComments(req, res) {
@@ -711,7 +734,7 @@ async function renderAdminComments(req, res) {
     <section class="panel">
       ${await renderAdminCommentTable(comments, "/admin/comments")}
     </section>
-  `));
+  `, req, res));
 }
 
 async function renderAdminCommentTable(
@@ -795,7 +818,7 @@ async function renderReaderWork(req, res, token, share) {
         </section>
       </main>
     </div>
-  `));
+  `, req, res));
 }
 
 async function renderReaderStory(req, res, url, token, share, storyId, readerId) {
@@ -891,7 +914,7 @@ async function renderReaderStory(req, res, url, token, share, storyId, readerId)
       </main>
     </div>
     <script src="/reader.js" defer></script>
-  `));
+  `, req, res));
 }
 
 function readerSidebar(token, stories, activeStoryId = null) {
@@ -1055,7 +1078,7 @@ function renderCommentReply(reply, { mode = "reader", token = "", readerId = "",
   `;
 }
 
-function adminPage(title, body) {
+function adminPage(title, body, req, res) {
   return page(title, `
     <div class="app-frame">
       <aside class="admin-nav">
@@ -1072,14 +1095,15 @@ function adminPage(title, body) {
       <main class="app-main">${body}</main>
     </div>
     <script src="/admin.js" defer></script>
-  `);
+  `, "", req, res);
 }
 
-function readerPage(title, body) {
-  return page(title, body, "reader-document");
+function readerPage(title, body, req, res) {
+  return page(title, body, "reader-document", req, res);
 }
 
-function page(title, body, bodyClass = "") {
+function page(title, body, bodyClass = "", req = null, res = null) {
+  const pageBody = req && res ? injectCsrfInputs(body, req, res) : body;
   return `<!doctype html>
 <html lang="ja">
 <head>
@@ -1090,9 +1114,17 @@ function page(title, body, bodyClass = "") {
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body class="${bodyClass}">
-  ${body}
+  ${pageBody}
 </body>
 </html>`;
+}
+
+function injectCsrfInputs(html, req, res) {
+  const input = csrfInput(req, res);
+  return html.replace(/<form\b([^>]*)>/gi, (match, attributes) => {
+    if (!/\bmethod\s*=\s*["']?post["']?/i.test(attributes)) return match;
+    return `${match}${input}`;
+  });
 }
 
 async function serveStatic(pathname, res) {
@@ -1107,19 +1139,41 @@ async function serveStatic(pathname, res) {
   if (!file) return false;
 
   const content = readFileSync(path.join(publicDir, file[0]));
-  res.writeHead(200, { "Content-Type": file[1] });
+  res.writeHead(200, securityHeaders({ "Content-Type": file[1] }));
   res.end(content);
   return true;
 }
 
 function renderHtml(res, status, html) {
-  res.writeHead(status, { "Content-Type": "text/html; charset=utf-8" });
+  res.writeHead(status, securityHeaders({
+    "Content-Type": "text/html; charset=utf-8",
+    "Cache-Control": "no-store"
+  }));
   res.end(html);
 }
 
 function redirect(res, location) {
-  res.writeHead(303, { Location: location });
+  res.writeHead(303, securityHeaders({ Location: location }));
   res.end();
+}
+
+function securityHeaders(headers = {}) {
+  return {
+    "Content-Security-Policy": [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+      "object-src 'none'",
+      "img-src 'self' data:",
+      "style-src 'self'",
+      "script-src 'self'",
+      "connect-src 'self'"
+    ].join("; "),
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "same-origin",
+    ...headers
+  };
 }
 
 function safeAdminRedirect(value) {
@@ -1127,6 +1181,44 @@ function safeAdminRedirect(value) {
   if (!value.startsWith("/admin")) return null;
   if (value.startsWith("//")) return null;
   return value;
+}
+
+function assertRuntimeConfig() {
+  if (!IS_PRODUCTION) return;
+
+  const errors = [];
+  if (!process.env.ADMIN_PASSWORD || ADMIN_PASSWORD === "novel-admin") {
+    errors.push("ADMIN_PASSWORD must be set to a non-default value in production.");
+  }
+  if (!process.env.APP_SECRET || APP_SECRET === "dev-secret-change-me" || APP_SECRET.length < 32) {
+    errors.push("APP_SECRET must be set to at least 32 characters in production.");
+  }
+
+  if (errors.length) {
+    throw new Error(errors.join(" "));
+  }
+}
+
+function publicUrl(pathname) {
+  return PUBLIC_ORIGIN ? `${PUBLIC_ORIGIN}${pathname}` : pathname;
+}
+
+function normalizePublicOrigin(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  try {
+    const origin = new URL(raw).origin;
+    if (!/^https?:\/\//.test(origin)) return "";
+    return origin;
+  } catch {
+    return "";
+  }
+}
+
+function normalizeShareToken(value) {
+  if (typeof value !== "string") return "";
+  return /^[A-Za-z0-9_-]{8,128}$/.test(value) ? value : "";
 }
 
 function notFound(res) {
@@ -1138,6 +1230,15 @@ function notFound(res) {
   `));
 }
 
+function forbidden(res, message = "この操作は許可されていません。") {
+  renderHtml(res, 403, page("操作できません", `
+    <section class="panel narrow">
+      <h1>操作できません</h1>
+      <p>${escapeHtml(message)}</p>
+    </section>
+  `));
+}
+
 function required(form, name) {
   const value = String(form.get(name) || "").trim();
   if (!value) throw new Error(`${name} is required`);
@@ -1145,6 +1246,8 @@ function required(form, name) {
 }
 
 function readForm(req) {
+  if (req.formData) return Promise.resolve(req.formData);
+
   return new Promise((resolve, reject) => {
     let body = "";
     req.setEncoding("utf8");
@@ -1155,7 +1258,10 @@ function readForm(req) {
         req.destroy();
       }
     });
-    req.on("end", () => resolve(new URLSearchParams(body)));
+    req.on("end", () => {
+      req.formData = new URLSearchParams(body);
+      resolve(req.formData);
+    });
     req.on("error", reject);
   });
 }
@@ -1168,9 +1274,37 @@ function parseCookies(req) {
     if (index < 0) continue;
     const key = pair.slice(0, index).trim();
     const value = pair.slice(index + 1).trim();
-    cookies[key] = decodeURIComponent(value);
+    try {
+      cookies[key] = decodeURIComponent(value);
+    } catch {
+      cookies[key] = value;
+    }
   }
   return cookies;
+}
+
+function cookieHeader(req, name, value, {
+  path = "/",
+  maxAge = null,
+  httpOnly = true,
+  sameSite = "Lax"
+} = {}) {
+  const parts = [`${name}=${encodeURIComponent(value)}`, `Path=${path}`];
+  if (maxAge !== null) parts.push(`Max-Age=${maxAge}`);
+  if (httpOnly) parts.push("HttpOnly");
+  if (sameSite) parts.push(`SameSite=${sameSite}`);
+  if (shouldUseSecureCookies(req)) parts.push("Secure");
+  return parts.join("; ");
+}
+
+function shouldUseSecureCookies(req) {
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase();
+  return forwardedProto === "https"
+    || Boolean(req.socket.encrypted)
+    || (IS_PRODUCTION && PUBLIC_ORIGIN.startsWith("https://"));
 }
 
 function addCookie(res, cookie) {
@@ -1186,25 +1320,81 @@ function addCookie(res, cookie) {
   res.setHeader("Set-Cookie", [current, cookie]);
 }
 
+function csrfInput(req, res) {
+  return `<input type="hidden" name="csrf_token" value="${escapeAttr(getCsrfToken(req, res))}">`;
+}
+
+function getCsrfToken(req, res) {
+  const seed = ensureCsrfSeed(req, res);
+  return sign(`csrf.${seed}`);
+}
+
+function ensureCsrfSeed(req, res) {
+  const cookies = parseCookies(req);
+  if (isValidCsrfSeed(cookies[CSRF_COOKIE_NAME])) {
+    return cookies[CSRF_COOKIE_NAME];
+  }
+
+  const seed = randomBytes(32).toString("base64url");
+  addCookie(res, cookieHeader(req, CSRF_COOKIE_NAME, seed, {
+    maxAge: CSRF_MAX_AGE,
+    httpOnly: true
+  }));
+  return seed;
+}
+
+function verifyCsrf(req, form) {
+  const seed = parseCookies(req)[CSRF_COOKIE_NAME];
+  if (!isValidCsrfSeed(seed)) return false;
+
+  const submitted = String(form.get("csrf_token") || "");
+  if (!submitted) return false;
+  return safeEqual(submitted, sign(`csrf.${seed}`));
+}
+
+function isValidCsrfSeed(value) {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{32,128}$/.test(value);
+}
+
 function makeAdminSession() {
-  const value = `admin.${Date.now()}`;
-  return `${value}.${sign(value)}`;
+  return signedValue("admin-session", `admin.${Date.now()}`);
 }
 
 function isAdmin(req) {
   const session = parseCookies(req).admin_session;
   if (!session) return false;
 
-  const parts = session.split(".");
-  if (parts.length < 3) return false;
-  const signature = parts.pop();
-  const value = parts.join(".");
-  const expected = sign(value);
-  return safeEqual(signature, expected);
+  const value = verifySignedValue("admin-session", session);
+  if (!value) return false;
+
+  const parts = value.split(".");
+  if (parts.length !== 2 || parts[0] !== "admin") return false;
+
+  const issuedAt = Number(parts[1]);
+  if (!Number.isFinite(issuedAt)) return false;
+
+  const age = Date.now() - issuedAt;
+  return age >= 0 && age <= ADMIN_SESSION_MAX_AGE * 1000;
 }
 
 function sign(value) {
   return createHmac("sha256", APP_SECRET).update(value).digest("base64url");
+}
+
+function signedValue(purpose, value) {
+  return `${value}.${sign(`${purpose}.${value}`)}`;
+}
+
+function verifySignedValue(purpose, value) {
+  if (typeof value !== "string") return "";
+
+  const parts = value.split(".");
+  if (parts.length < 2) return "";
+
+  const signature = parts.pop();
+  const payload = parts.join(".");
+  const expected = sign(`${purpose}.${payload}`);
+  return safeEqual(signature, expected) ? payload : "";
 }
 
 function safeEqual(a, b) {
@@ -1215,10 +1405,19 @@ function safeEqual(a, b) {
 
 function ensureReaderId(req, res) {
   const cookies = parseCookies(req);
-  if (cookies.reader_id) return cookies.reader_id;
-  const readerId = makeId("reader");
-  addCookie(res, `reader_id=${encodeURIComponent(readerId)}; Path=/; Max-Age=31536000; SameSite=Lax`);
-  return readerId;
+  const readerId = verifySignedValue("reader-id", cookies.reader_id);
+  if (isValidReaderId(readerId)) return readerId;
+
+  const nextReaderId = makeId("reader");
+  addCookie(res, cookieHeader(req, "reader_id", signedValue("reader-id", nextReaderId), {
+    maxAge: READER_COOKIE_MAX_AGE,
+    httpOnly: true
+  }));
+  return nextReaderId;
+}
+
+function isValidReaderId(value) {
+  return typeof value === "string" && /^reader_[a-f0-9]{18}$/.test(value);
 }
 
 function escapeAttr(value) {

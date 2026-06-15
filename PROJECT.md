@@ -98,6 +98,9 @@
 本番環境では以下の環境変数を設定する。
 - `TURSO_DATABASE_URL`：TursoのデータベースURL
 - `TURSO_AUTH_TOKEN`：Tursoの認証トークン
+- `ADMIN_PASSWORD`：管理画面ログイン用パスワード。本番環境では未設定や初期値を許可しない。
+- `APP_SECRET`：Cookie署名やCSRF検証に使う秘密値。本番環境では32文字以上の十分にランダムな値を必須とする。
+- `PUBLIC_ORIGIN`：共有URLを絶対URLで表示するための公開オリジン。例：`https://novel-review.onrender.com`。未設定時は安全のため相対URLで表示する。
 
 これらが未設定の場合は、ローカル開発用として`file:data/app.sqlite`を使用する。
 移行時に既存のローカルSQLiteデータをTursoへ引き継ぐ必要はない。
