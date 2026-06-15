@@ -1086,6 +1086,7 @@ function page(title, body, bodyClass = "") {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(title)} - 小説共有</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body class="${bodyClass}">
@@ -1099,6 +1100,7 @@ async function serveStatic(pathname, res) {
     "/styles.css": ["styles.css", "text/css; charset=utf-8"],
     "/admin.js": ["admin.js", "application/javascript; charset=utf-8"],
     "/reader.js": ["reader.js", "application/javascript; charset=utf-8"],
+    "/favicon.svg": ["favicon.svg", "image/svg+xml"],
     "/login-bg.png": ["login-bg.png", "image/png"]
   };
   const file = files[pathname];
