@@ -989,7 +989,7 @@ async function renderAdminSurveyResponses(questions, responses) {
   }))).join("");
 
   return `
-    <div class="table-scroll">
+    <div class="table-scroll survey-response-scroll">
       <table class="survey-response-table">
         <thead>
           <tr>
