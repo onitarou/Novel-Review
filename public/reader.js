@@ -5,6 +5,16 @@
   setupConfirmForms();
   setupMobilePanels();
 
+  const defaults = {
+    orientation: "horizontal",
+    fontSize: "18",
+    lineHeight: "19",
+    paragraphGap: "0",
+    theme: "light"
+  };
+  const prefs = { ...defaults, ...readJson("novel_reader_prefs") };
+  applyTheme(prefs.theme);
+
   const storyBody = document.querySelector("[data-story-body]");
   if (!storyBody) return;
 
@@ -14,15 +24,6 @@
   const hangingPunctuationPattern = /^[、。，．｡､,，.．]$/u;
   let hangingPunctuationFrame = 0;
   let hangingPunctuationResizeObserver = null;
-
-  const defaults = {
-    orientation: "horizontal",
-    fontSize: "18",
-    lineHeight: "19",
-    paragraphGap: "0",
-    theme: "light"
-  };
-  const prefs = { ...defaults, ...readJson("novel_reader_prefs") };
   shell.classList.toggle("needs-hanging-punctuation-fallback", !supportsNativeHangingPunctuation);
 
   const controls = document.querySelectorAll("[data-pref]");
@@ -312,8 +313,7 @@
     document.documentElement.style.setProperty("--reader-line-height", String(Number(next.lineHeight) / 10));
     document.documentElement.style.setProperty("--paragraph-gap", `${Number(next.paragraphGap) / 10}rem`);
 
-    document.body.classList.remove("theme-light", "theme-sepia", "theme-dark");
-    document.body.classList.add(`theme-${next.theme}`);
+    applyTheme(next.theme);
 
     if (isVertical) {
       requestAnimationFrame(() => {
@@ -321,6 +321,12 @@
       });
     }
     scheduleHangingPunctuationFallback();
+  }
+
+  function applyTheme(theme) {
+    const normalizedTheme = ["light", "sepia", "dark"].includes(theme) ? theme : defaults.theme;
+    document.body.classList.remove("theme-light", "theme-sepia", "theme-dark");
+    document.body.classList.add(`theme-${normalizedTheme}`);
   }
 
   function scheduleHangingPunctuationFallback() {
