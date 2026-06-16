@@ -837,13 +837,16 @@ async function renderAdminCommentTable(
 
 function renderReaderStoryRating(token, story, readerRating, ratingSummary) {
   const currentScore = Number(readerRating?.score || 0);
-  const options = [1, 2, 3].map((score) => `
-    <label class="star-rating-option ${currentScore === score ? "selected" : ""}">
-      <input type="radio" name="score" value="${score}" ${currentScore === score ? "checked" : ""} required>
-      <span class="star-rating-stars" aria-hidden="true">${renderStars(score, 3)}</span>
-      <span class="star-rating-label">${score}</span>
+  const options = [3, 2, 1].map((score) => {
+    const inputId = `story-rating-${story.id}-${score}`;
+    return `
+    <input class="star-rating-input" id="${escapeAttr(inputId)}" type="radio" name="score" value="${score}" ${currentScore === score ? "checked" : ""} required>
+    <label class="star-rating-option" for="${escapeAttr(inputId)}">
+      <span class="star-rating-star" aria-hidden="true"></span>
+      <span class="star-rating-label">${score}点</span>
     </label>
-  `).join("");
+  `;
+  }).join("");
 
   return `
     <section class="story-rating-panel" id="story-rating">
