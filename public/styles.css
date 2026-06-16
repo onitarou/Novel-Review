@@ -609,12 +609,30 @@ pre {
   overflow: auto;
 }
 
+.story-list-scroll {
+  max-block-size: calc(3rem + 10 * 3.4rem);
+  overflow: auto;
+}
+
+.comment-table-scroll {
+  max-block-size: calc(3rem + 5 * 12rem);
+  overflow: auto;
+}
+
 .survey-response-scroll .survey-response-table {
   border-collapse: separate;
   border-spacing: 0;
 }
 
-.survey-response-scroll .survey-response-table thead th {
+.story-list-scroll .story-table,
+.comment-table-scroll .comment-table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.survey-response-scroll .survey-response-table thead th,
+.story-list-scroll .story-table thead th,
+.comment-table-scroll .comment-table thead th {
   background: var(--surface);
   position: sticky;
   top: 0;
@@ -623,6 +641,14 @@ pre {
 
 .survey-response-scroll .survey-response-table tbody tr {
   block-size: 4.8rem;
+}
+
+.story-list-scroll .story-table tbody tr {
+  block-size: 3.4rem;
+}
+
+.comment-table-scroll .comment-table tbody tr {
+  block-size: 12rem;
 }
 
 .story-rating-form {

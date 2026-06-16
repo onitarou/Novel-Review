@@ -722,10 +722,12 @@ async function renderAdminWork(req, res, workId, url) {
 
     <section class="panel">
       <h2>話</h2>
-      <table>
-        <thead><tr><th>タイトル</th><th>章</th><th>状態</th><th>版</th><th>評価</th><th>順</th></tr></thead>
-        <tbody>${storyRows || `<tr><td colspan="6">話がありません。</td></tr>`}</tbody>
-      </table>
+      <div class="table-scroll story-list-scroll">
+        <table class="story-table">
+          <thead><tr><th>タイトル</th><th>章</th><th>状態</th><th>版</th><th>評価</th><th>順</th></tr></thead>
+          <tbody>${storyRows || `<tr><td colspan="6">話がありません。</td></tr>`}</tbody>
+        </table>
+      </div>
     </section>
 
     <section class="panel">
@@ -735,7 +737,8 @@ async function renderAdminWork(req, res, workId, url) {
       </div>
       ${await renderAdminCommentTable(comments, `/admin/works/${work.id}`, {
         emptyMessage: "この作品へのコメントはありません。",
-        showWork: false
+        showWork: false,
+        scrollClass: "comment-table-scroll"
       })}
     </section>
   `, req, res));
@@ -870,7 +873,8 @@ async function renderAdminCommentTable(
   {
     emptyMessage = "コメントはありません。",
     showWork = true,
-    showStory = true
+    showStory = true,
+    scrollClass = ""
   } = {}
 ) {
   const rows = (await Promise.all(comments.map(async (comment) => {
@@ -914,12 +918,14 @@ async function renderAdminCommentTable(
     `;
   }))).join("");
 
-  return `
+  const table = `
     <table class="comment-table">
       <thead><tr><th>読者</th><th>コメント</th><th>状態</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="3">${escapeHtml(emptyMessage)}</td></tr>`}</tbody>
     </table>
   `;
+
+  return scrollClass ? `<div class="table-scroll ${escapeAttr(scrollClass)}">${table}</div>` : table;
 }
 
 function renderAdminSurveyQuestions(work, questions) {
