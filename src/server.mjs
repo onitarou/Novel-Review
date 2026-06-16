@@ -684,22 +684,6 @@ async function renderAdminWork(req, res, workId, url) {
       <p class="muted">共有URLは発行直後のみ画面に表示します。忘れた場合は再発行してください。</p>
     </section>
 
-    <section class="panel" id="work-survey-admin">
-      <div class="section-heading">
-        <h2>作品アンケート</h2>
-        <span class="status">${surveyQuestions.length}問</span>
-      </div>
-      ${renderAdminSurveyQuestions(work, surveyQuestions)}
-    </section>
-
-    <section class="panel">
-      <div class="section-heading">
-        <h2>アンケート回答</h2>
-        <span class="status">${surveyResponses.length}件</span>
-      </div>
-      ${await renderAdminSurveyResponses(surveyQuestions, surveyResponses)}
-    </section>
-
     <section class="two-column">
       <div class="panel">
         <h2>章を追加</h2>
@@ -728,6 +712,22 @@ async function renderAdminWork(req, res, workId, url) {
           <tbody>${storyRows || `<tr><td colspan="6">話がありません。</td></tr>`}</tbody>
         </table>
       </div>
+    </section>
+
+    <section class="panel" id="work-survey-admin">
+      <div class="section-heading">
+        <h2>作品アンケート</h2>
+        <span class="status">${surveyQuestions.length}問</span>
+      </div>
+      ${renderAdminSurveyQuestions(work, surveyQuestions)}
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <h2>アンケート回答</h2>
+        <span class="status">${surveyResponses.length}件</span>
+      </div>
+      ${await renderAdminSurveyResponses(surveyQuestions, surveyResponses)}
     </section>
 
     <section class="panel">
