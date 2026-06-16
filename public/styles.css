@@ -970,6 +970,10 @@ button.danger:hover {
   max-width: 100%;
 }
 
+.reader-shell.vertical .story-rating-panel {
+  margin-bottom: 1rem;
+}
+
 .reader-shell.vertical .story-body-content {
   direction: ltr;
   height: 100%;
