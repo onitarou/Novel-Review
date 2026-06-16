@@ -9,16 +9,19 @@ import {
   createComment,
   createCommentReply,
   createStory,
+  createSurveyQuestion,
   createWork,
   deleteCommentByReader,
   deleteCommentReply,
   deleteCommentReplyByReader,
+  deleteSurveyQuestion,
   exportSnapshot,
   getActiveShareLink,
   getComment,
   getCommentReply,
   getCurrentVersion,
   getReaderStoryRating,
+  getReaderSurveyAnswers,
   getShareByToken,
   getStory,
   getStoryRatingSummary,
@@ -32,11 +35,15 @@ import {
   listReaderComments,
   listStoriesForAdmin,
   listStoriesForReader,
+  listSurveyAnswersForResponse,
+  listSurveyQuestions,
+  listSurveyResponses,
   listVersions,
   makeId,
   publishStory,
   regenerateShareLink,
   revokeShareLink,
+  saveSurveyResponse,
   updateCommentByReader,
   updateCommentReply,
   updateCommentReplyByReader,
@@ -58,6 +65,11 @@ const CSRF_COOKIE_NAME = "csrf_seed";
 const CSRF_MAX_AGE = 60 * 60 * 24 * 7;
 const READER_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 const publicDir = path.join(process.cwd(), "public");
+const SURVEY_QUESTION_TYPES = {
+  rating_5: "5段階評価",
+  text: "テキスト",
+  number: "数値"
+};
 
 assertRuntimeConfig();
 await initDb();
@@ -213,6 +225,31 @@ async function routeAdmin(req, res, url, pathname) {
     return;
   }
 
+  match = pathname.match(/^\/admin\/works\/([^/]+)\/survey\/questions$/);
+  if (match && req.method === "POST") {
+    const form = await readForm(req);
+    const answerType = parseSurveyQuestionType(form.get("answer_type"));
+    if (!answerType) {
+      return forbidden(res, "回答形式を選択してください。");
+    }
+
+    await createSurveyQuestion(match[1], {
+      prompt: required(form, "prompt"),
+      answerType,
+      sortOrder: Number(form.get("sort_order")) || 0
+    });
+    redirect(res, `/admin/works/${match[1]}#work-survey-admin`);
+    return;
+  }
+
+  match = pathname.match(/^\/admin\/survey-questions\/([^/]+)\/delete$/);
+  if (match && req.method === "POST") {
+    const question = await deleteSurveyQuestion(match[1]);
+    if (!question) return notFound(res);
+    redirect(res, `/admin/works/${question.work_id}#work-survey-admin`);
+    return;
+  }
+
   match = pathname.match(/^\/admin\/works\/([^/]+)\/chapters$/);
   if (match && req.method === "POST") {
     const form = await readForm(req);
@@ -290,10 +327,11 @@ async function routeAdmin(req, res, url, pathname) {
 async function routeReader(req, res, url, pathname) {
   const replyMatch = pathname.match(/^\/s\/([^/]+)\/comment-replies\/([^/]+)\/(edit|delete)$/);
   const ratingMatch = pathname.match(/^\/s\/([^/]+)\/stories\/([^/]+)\/rating$/);
+  const surveyMatch = pathname.match(/^\/s\/([^/]+)\/survey$/);
   const match = pathname.match(/^\/s\/([^/]+)(?:\/stories\/([^/]+))?(?:\/comments\/([^/]+)\/(edit|delete|replies))?$/);
-  if (!match && !replyMatch && !ratingMatch) return notFound(res);
+  if (!match && !replyMatch && !ratingMatch && !surveyMatch) return notFound(res);
 
-  const token = replyMatch ? replyMatch[1] : ratingMatch ? ratingMatch[1] : match[1];
+  const token = replyMatch ? replyMatch[1] : ratingMatch ? ratingMatch[1] : surveyMatch ? surveyMatch[1] : match[1];
   const storyId = ratingMatch?.[2] || match?.[2] || null;
   const commentId = match?.[3] || null;
   const commentAction = match?.[4] || null;
@@ -340,8 +378,38 @@ async function routeReader(req, res, url, pathname) {
     return notFound(res);
   }
 
+  if (surveyMatch && req.method === "POST") {
+    const form = await readForm(req);
+    const questions = await listSurveyQuestions(share.work_id);
+    if (!questions.length) return notFound(res);
+
+    let answers = [];
+    try {
+      answers = parseSurveyAnswers(form, questions);
+    } catch {
+      return forbidden(res, "アンケート回答の形式を確認してください。");
+    }
+
+    if (!answers.length) {
+      return forbidden(res, "少なくとも1つの質問に回答してください。");
+    }
+
+    await saveSurveyResponse({
+      workId: share.work_id,
+      readerId,
+      questionIds: questions.map((question) => question.id),
+      answers
+    });
+    redirect(res, `/s/${token}#work-survey`);
+    return;
+  }
+
+  if (surveyMatch) {
+    return notFound(res);
+  }
+
   if (!storyId && req.method === "GET") {
-    return renderReaderWork(req, res, token, share);
+    return renderReaderWork(req, res, token, share, readerId);
   }
 
   if (storyId && !commentId && req.method === "GET") {
@@ -538,6 +606,8 @@ async function renderAdminWork(req, res, workId, url) {
   const stories = await listStoriesForAdmin(workId);
   const comments = await listCommentsForAdmin({ workId });
   const activeShare = await getActiveShareLink(workId);
+  const surveyQuestions = await listSurveyQuestions(workId);
+  const surveyResponses = await listSurveyResponses(workId);
   const shareToken = normalizeShareToken(url.searchParams.get("shareToken"));
   const issuedShareUrl = shareToken ? publicUrl(`/s/${encodeURIComponent(shareToken)}`) : "";
   const chapterOptions = chapters.map((chapter) => (
@@ -611,6 +681,22 @@ async function renderAdminWork(req, res, workId, url) {
         </form>
       `}
       <p class="muted">共有URLは発行直後のみ画面に表示します。忘れた場合は再発行してください。</p>
+    </section>
+
+    <section class="panel" id="work-survey-admin">
+      <div class="section-heading">
+        <h2>作品アンケート</h2>
+        <span class="status">${surveyQuestions.length}問</span>
+      </div>
+      ${renderAdminSurveyQuestions(work, surveyQuestions)}
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <h2>アンケート回答</h2>
+        <span class="status">${surveyResponses.length}件</span>
+      </div>
+      ${await renderAdminSurveyResponses(surveyQuestions, surveyResponses)}
     </section>
 
     <section class="two-column">
@@ -835,6 +921,176 @@ async function renderAdminCommentTable(
   `;
 }
 
+function renderAdminSurveyQuestions(work, questions) {
+  const questionRows = questions.map((question) => `
+    <tr>
+      <td>${escapeHtml(question.prompt)}</td>
+      <td>${escapeHtml(surveyQuestionTypeLabel(question.answer_type))}</td>
+      <td>${question.sort_order}</td>
+      <td>
+        <form method="post" action="/admin/survey-questions/${question.id}/delete" data-confirm="このアンケート質問を削除します。既存の回答データはバックアップには残ります。よろしいですか？">
+          <button class="danger" type="submit">削除</button>
+        </form>
+      </td>
+    </tr>
+  `).join("");
+
+  return `
+    <form class="grid-form survey-question-form" method="post" action="/admin/works/${work.id}/survey/questions">
+      <label>
+        質問文
+        <input name="prompt" required maxlength="500" placeholder="例: この話を読み続けたいと思いましたか？">
+      </label>
+      <label>
+        回答形式
+        <select name="answer_type" required>${surveyQuestionTypeOptions()}</select>
+      </label>
+      <label>
+        並び順
+        <input name="sort_order" type="number" value="${questions.length + 1}">
+      </label>
+      <button class="primary" type="submit">質問を追加</button>
+    </form>
+
+    <div class="table-scroll">
+      <table class="survey-question-table">
+        <thead><tr><th>質問</th><th>形式</th><th>順</th><th>操作</th></tr></thead>
+        <tbody>${questionRows || `<tr><td colspan="4">アンケート質問はありません。</td></tr>`}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function renderAdminSurveyResponses(questions, responses) {
+  if (!questions.length) {
+    return `<p class="muted">アンケート質問を追加すると、読者の作品情報ページに回答フォームが表示されます。</p>`;
+  }
+
+  if (!responses.length) {
+    return `<p class="muted">まだアンケート回答はありません。</p>`;
+  }
+
+  const rows = (await Promise.all(responses.map(async (response) => {
+    const answers = await listSurveyAnswersForResponse(response.id);
+    const answerByQuestion = new Map(answers.map((answer) => [answer.question_id, answer]));
+
+    return `
+      <tr>
+        <td>
+          <strong>${escapeHtml(shortReaderId(response.reader_id))}</strong>
+          <p class="muted">${formatDate(response.updated_at)}</p>
+        </td>
+        ${questions.map((question) => `
+          <td>${renderSurveyAnswerValue(question, answerByQuestion.get(question.id))}</td>
+        `).join("")}
+      </tr>
+    `;
+  }))).join("");
+
+  return `
+    <div class="table-scroll">
+      <table class="survey-response-table">
+        <thead>
+          <tr>
+            <th>回答者</th>
+            ${questions.map((question) => `<th>${escapeHtml(question.prompt)}</th>`).join("")}
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderSurveyAnswerValue(question, answer) {
+  if (!answerHasSurveyValue(question, answer)) {
+    return `<span class="muted">未回答</span>`;
+  }
+
+  if (question.answer_type === "rating_5") {
+    const rating = Number(answer.value_rating || 0);
+    return `<span class="survey-rating-readonly" aria-label="${rating}点">${renderStars(rating, 5)}</span>`;
+  }
+
+  if (question.answer_type === "number") {
+    return escapeHtml(formatSurveyNumber(answer.value_number));
+  }
+
+  return `<div class="survey-answer-text">${nl2br(answer.value_text || "")}</div>`;
+}
+
+function answerHasSurveyValue(question, answer) {
+  if (!answer) return false;
+  if (question.answer_type === "rating_5") return Number(answer.value_rating) > 0;
+  if (question.answer_type === "number") return answer.value_number !== null && answer.value_number !== undefined && answer.value_number !== "";
+  return Boolean(String(answer.value_text || "").trim());
+}
+
+function renderReaderWorkSurvey(token, questions, surveyState) {
+  if (!questions.length) return "";
+
+  const answerByQuestion = new Map((surveyState.answers || []).map((answer) => [answer.question_id, answer]));
+  const answered = questions.some((question) => answerHasSurveyValue(question, answerByQuestion.get(question.id)));
+
+  return `
+    <section class="work-survey-panel" id="work-survey">
+      <div class="section-heading">
+        <h2>作品アンケート</h2>
+        <span class="status">${answered ? "回答済み" : "未回答"}</span>
+      </div>
+      <form class="work-survey-form" method="post" action="/s/${token}/survey">
+        ${questions.map((question) => renderReaderSurveyQuestion(question, answerByQuestion.get(question.id))).join("")}
+        <button class="primary" type="submit">${answered ? "回答を更新" : "回答を送信"}</button>
+      </form>
+    </section>
+  `;
+}
+
+function renderReaderSurveyQuestion(question, answer) {
+  const fieldName = surveyFieldName(question.id);
+  const label = escapeHtml(question.prompt);
+
+  if (question.answer_type === "rating_5") {
+    const currentRating = Number(answer?.value_rating || 0);
+    const options = [5, 4, 3, 2, 1].map((score) => {
+      const inputId = `${fieldName}-${score}`;
+      return `
+        <input class="star-rating-input" id="${escapeAttr(inputId)}" type="radio" name="${escapeAttr(fieldName)}" value="${score}" ${currentRating === score ? "checked" : ""}>
+        <label class="star-rating-option" for="${escapeAttr(inputId)}">
+          <span class="star-rating-star" aria-hidden="true"></span>
+          <span class="star-rating-label">${score}点</span>
+        </label>
+      `;
+    }).join("");
+
+    return `
+      <fieldset class="survey-question">
+        <legend>${label}</legend>
+        <div class="star-rating-control survey-star-rating" role="radiogroup" aria-label="${escapeAttr(question.prompt)}">
+          ${options}
+        </div>
+      </fieldset>
+    `;
+  }
+
+  if (question.answer_type === "number") {
+    const value = answer?.value_number ?? "";
+    return `
+      <label class="survey-question">
+        ${label}
+        <input name="${escapeAttr(fieldName)}" type="number" step="any" value="${escapeAttr(value)}">
+      </label>
+    `;
+  }
+
+  return `
+    <label class="survey-question">
+      ${label}
+      <textarea name="${escapeAttr(fieldName)}" rows="4" maxlength="2000">${escapeHtml(answer?.value_text || "")}</textarea>
+    </label>
+  `;
+}
+
 function renderReaderStoryRating(token, story, readerRating, ratingSummary) {
   const currentScore = Number(readerRating?.score || 0);
   const options = [3, 2, 1].map((score) => {
@@ -915,14 +1171,42 @@ function formatRatingAverage(value) {
   return number.toFixed(2).replace(/\.?0+$/, "");
 }
 
+function surveyQuestionTypeOptions(selected = "") {
+  return Object.entries(SURVEY_QUESTION_TYPES).map(([value, label]) => (
+    `<option value="${value}" ${selected === value ? "selected" : ""}>${escapeHtml(label)}</option>`
+  )).join("");
+}
+
+function surveyQuestionTypeLabel(value) {
+  return SURVEY_QUESTION_TYPES[value] || value;
+}
+
+function surveyFieldName(questionId) {
+  return `survey_${questionId}`;
+}
+
+function shortReaderId(readerId) {
+  const value = String(readerId || "");
+  const suffix = value.replace(/^reader_/, "").slice(-6);
+  return suffix ? `読者 ${suffix}` : "読者";
+}
+
+function formatSurveyNumber(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  return Number.isInteger(number) ? String(number) : String(number).replace(/\.?0+$/, "");
+}
+
 function renderStars(score, max) {
   const count = Math.max(0, Math.min(max, Number(score) || 0));
   return `${"★".repeat(count)}${"☆".repeat(max - count)}`;
 }
 
-async function renderReaderWork(req, res, token, share) {
+async function renderReaderWork(req, res, token, share, readerId) {
   const work = await getWork(share.work_id);
   const stories = await listStoriesForReader(share.work_id);
+  const surveyQuestions = await listSurveyQuestions(share.work_id);
+  const surveyState = await getReaderSurveyAnswers(share.work_id, readerId);
   renderHtml(res, 200, readerPage(work.title, `
     <div class="reader-shell horizontal" data-reader-shell>
       ${readerSidebar(token, stories)}
@@ -950,6 +1234,7 @@ async function renderReaderWork(req, res, token, share) {
               <p>${nl2br(work.author_note || "作者メモは未設定です。")}</p>
             </section>
           </div>
+          ${renderReaderWorkSurvey(token, surveyQuestions, surveyState)}
         </section>
       </main>
     </div>
@@ -1387,6 +1672,42 @@ function required(form, name) {
 function parseStoryRatingScore(value) {
   const score = Number(value);
   return [1, 2, 3].includes(score) ? score : null;
+}
+
+function parseSurveyQuestionType(value) {
+  const type = String(value || "");
+  return Object.hasOwn(SURVEY_QUESTION_TYPES, type) ? type : "";
+}
+
+function parseSurveyAnswers(form, questions) {
+  const answers = [];
+
+  for (const question of questions) {
+    const value = String(form.get(surveyFieldName(question.id)) ?? "").trim();
+    if (!value) continue;
+
+    if (question.answer_type === "rating_5") {
+      const rating = Number(value);
+      if (![1, 2, 3, 4, 5].includes(rating)) {
+        throw new Error("invalid rating answer");
+      }
+      answers.push({ questionId: question.id, valueRating: rating });
+      continue;
+    }
+
+    if (question.answer_type === "number") {
+      const number = Number(value);
+      if (!Number.isFinite(number)) {
+        throw new Error("invalid number answer");
+      }
+      answers.push({ questionId: question.id, valueNumber: number });
+      continue;
+    }
+
+    answers.push({ questionId: question.id, valueText: value.slice(0, 2000) });
+  }
+
+  return answers;
 }
 
 function readForm(req) {

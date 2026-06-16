@@ -134,6 +134,40 @@ export async function initDb() {
       CHECK (score IN (1, 2, 3))
     );
 
+    CREATE TABLE IF NOT EXISTS survey_questions (
+      id TEXT PRIMARY KEY,
+      work_id TEXT NOT NULL REFERENCES works(id),
+      prompt TEXT NOT NULL,
+      answer_type TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      deleted_at TEXT,
+      CHECK (answer_type IN ('rating_5', 'text', 'number'))
+    );
+
+    CREATE TABLE IF NOT EXISTS survey_responses (
+      id TEXT PRIMARY KEY,
+      work_id TEXT NOT NULL REFERENCES works(id),
+      reader_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (work_id, reader_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS survey_answers (
+      id TEXT PRIMARY KEY,
+      response_id TEXT NOT NULL REFERENCES survey_responses(id),
+      question_id TEXT NOT NULL REFERENCES survey_questions(id),
+      value_text TEXT,
+      value_number REAL,
+      value_rating INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (response_id, question_id),
+      CHECK (value_rating IS NULL OR value_rating IN (1, 2, 3, 4, 5))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_chapters_work ON chapters(work_id, sort_order);
     CREATE INDEX IF NOT EXISTS idx_stories_work ON stories(work_id, sort_order);
     CREATE INDEX IF NOT EXISTS idx_versions_story ON story_versions(story_id, version_number);
@@ -142,6 +176,9 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_comment_replies_comment ON comment_replies(comment_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_story_ratings_story ON story_ratings(story_id, score);
     CREATE INDEX IF NOT EXISTS idx_story_ratings_work ON story_ratings(work_id, story_id);
+    CREATE INDEX IF NOT EXISTS idx_survey_questions_work ON survey_questions(work_id, sort_order);
+    CREATE INDEX IF NOT EXISTS idx_survey_responses_work ON survey_responses(work_id, updated_at);
+    CREATE INDEX IF NOT EXISTS idx_survey_answers_response ON survey_answers(response_id, question_id);
     CREATE INDEX IF NOT EXISTS idx_share_links_work ON share_links(work_id, status);
   `);
 
@@ -733,6 +770,139 @@ export async function getStoryRatingSummary(storyId) {
   };
 }
 
+export async function listSurveyQuestions(workId) {
+  return all(`
+    SELECT *
+    FROM survey_questions
+    WHERE work_id = ? AND deleted_at IS NULL
+    ORDER BY sort_order, created_at
+  `, [workId]);
+}
+
+export async function createSurveyQuestion(workId, { prompt, answerType, sortOrder = 0 }) {
+  if (!isSurveyAnswerType(answerType)) {
+    throw new Error("invalid survey question type");
+  }
+
+  const id = makeId("surveyq");
+  const now = nowIso();
+  await run(`
+    INSERT INTO survey_questions (
+      id,
+      work_id,
+      prompt,
+      answer_type,
+      sort_order,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `, [id, workId, prompt, answerType, Number(sortOrder) || 0, now, now]);
+  await touchWork(workId);
+  return id;
+}
+
+export async function deleteSurveyQuestion(questionId) {
+  const question = await get(`
+    SELECT *
+    FROM survey_questions
+    WHERE id = ? AND deleted_at IS NULL
+  `, [questionId]);
+  if (!question) return null;
+
+  const now = nowIso();
+  await run(`
+    UPDATE survey_questions
+    SET deleted_at = ?, updated_at = ?
+    WHERE id = ? AND deleted_at IS NULL
+  `, [now, now, questionId]);
+  await touchWork(question.work_id);
+  return question;
+}
+
+export async function getReaderSurveyAnswers(workId, readerId) {
+  const response = await get(`
+    SELECT *
+    FROM survey_responses
+    WHERE work_id = ? AND reader_id = ?
+  `, [workId, readerId]);
+  if (!response) return { response: null, answers: [] };
+
+  const answers = await all(`
+    SELECT survey_answers.*
+    FROM survey_answers
+    JOIN survey_questions ON survey_questions.id = survey_answers.question_id
+    WHERE survey_answers.response_id = ?
+      AND survey_questions.deleted_at IS NULL
+    ORDER BY survey_questions.sort_order, survey_questions.created_at
+  `, [response.id]);
+
+  return { response, answers };
+}
+
+export async function saveSurveyResponse({ workId, readerId, questionIds, answers }) {
+  const now = nowIso();
+  let response = await get(`
+    SELECT *
+    FROM survey_responses
+    WHERE work_id = ? AND reader_id = ?
+  `, [workId, readerId]);
+
+  if (response) {
+    await run(`
+      UPDATE survey_responses
+      SET updated_at = ?
+      WHERE id = ?
+    `, [now, response.id]);
+  } else {
+    const id = makeId("surveyres");
+    await run(`
+      INSERT INTO survey_responses (id, work_id, reader_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?)
+    `, [id, workId, readerId, now, now]);
+    response = { id, work_id: workId, reader_id: readerId };
+  }
+
+  const answeredQuestionIds = new Set(answers.map((answer) => answer.questionId));
+  for (const questionId of questionIds) {
+    if (answeredQuestionIds.has(questionId)) continue;
+    await run(`
+      DELETE FROM survey_answers
+      WHERE response_id = ? AND question_id = ?
+    `, [response.id, questionId]);
+  }
+
+  for (const answer of answers) {
+    await upsertSurveyAnswer(response.id, answer, now);
+  }
+
+  return response.id;
+}
+
+export async function listSurveyResponses(workId) {
+  return all(`
+    SELECT *
+    FROM survey_responses
+    WHERE work_id = ?
+    ORDER BY updated_at DESC
+  `, [workId]);
+}
+
+export async function listSurveyAnswersForResponse(responseId) {
+  return all(`
+    SELECT
+      survey_answers.*,
+      survey_questions.prompt,
+      survey_questions.answer_type,
+      survey_questions.sort_order,
+      survey_questions.deleted_at AS question_deleted_at
+    FROM survey_answers
+    JOIN survey_questions ON survey_questions.id = survey_answers.question_id
+    WHERE survey_answers.response_id = ?
+    ORDER BY survey_questions.sort_order, survey_questions.created_at
+  `, [responseId]);
+}
+
 export async function exportSnapshot() {
   return {
     exportedAt: nowIso(),
@@ -746,7 +916,10 @@ export async function exportSnapshot() {
     `),
     comments: await all("SELECT * FROM comments"),
     commentReplies: await all("SELECT * FROM comment_replies"),
-    storyRatings: await all("SELECT * FROM story_ratings")
+    storyRatings: await all("SELECT * FROM story_ratings"),
+    surveyQuestions: await all("SELECT * FROM survey_questions"),
+    surveyResponses: await all("SELECT * FROM survey_responses"),
+    surveyAnswers: await all("SELECT * FROM survey_answers")
   };
 }
 
@@ -764,6 +937,50 @@ function nullableNumber(value) {
   if (value === "" || value === undefined || value === null) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function isSurveyAnswerType(value) {
+  return ["rating_5", "text", "number"].includes(value);
+}
+
+async function upsertSurveyAnswer(responseId, answer, now) {
+  const existing = await get(`
+    SELECT id
+    FROM survey_answers
+    WHERE response_id = ? AND question_id = ?
+  `, [responseId, answer.questionId]);
+
+  const valueText = answer.valueText ?? null;
+  const valueNumber = nullableNumber(answer.valueNumber);
+  const valueRating = nullableNumber(answer.valueRating);
+
+  if (existing) {
+    await run(`
+      UPDATE survey_answers
+      SET value_text = ?,
+          value_number = ?,
+          value_rating = ?,
+          updated_at = ?
+      WHERE id = ?
+    `, [valueText, valueNumber, valueRating, now, existing.id]);
+    return existing.id;
+  }
+
+  const id = makeId("surveya");
+  await run(`
+    INSERT INTO survey_answers (
+      id,
+      response_id,
+      question_id,
+      value_text,
+      value_number,
+      value_rating,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `, [id, responseId, answer.questionId, valueText, valueNumber, valueRating, now, now]);
+  return id;
 }
 
 async function migrateCommentReplies() {

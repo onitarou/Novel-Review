@@ -549,6 +549,61 @@ pre {
   padding: 1rem;
 }
 
+.work-survey-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 1rem;
+  padding: 1rem;
+}
+
+.work-survey-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.survey-question {
+  border: 0;
+  display: grid;
+  gap: 0.45rem;
+  margin: 0;
+  min-inline-size: 0;
+  padding: 0;
+}
+
+.survey-question legend {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 800;
+  padding: 0;
+}
+
+.survey-question-form {
+  margin-bottom: 1rem;
+}
+
+.survey-question-table,
+.survey-response-table {
+  min-width: 720px;
+}
+
+.survey-answer-text {
+  max-width: 28rem;
+  white-space: normal;
+}
+
+.survey-rating-readonly {
+  color: var(--warning);
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
 .story-rating-form {
   align-items: center;
   display: flex;
