@@ -121,12 +121,27 @@ export async function initDb() {
       CHECK (sender_role IN ('author', 'reader'))
     );
 
+    CREATE TABLE IF NOT EXISTS story_ratings (
+      id TEXT PRIMARY KEY,
+      work_id TEXT NOT NULL REFERENCES works(id),
+      story_id TEXT NOT NULL REFERENCES stories(id),
+      story_version_id TEXT NOT NULL REFERENCES story_versions(id),
+      reader_id TEXT NOT NULL,
+      score INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE (story_id, reader_id),
+      CHECK (score IN (1, 2, 3))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_chapters_work ON chapters(work_id, sort_order);
     CREATE INDEX IF NOT EXISTS idx_stories_work ON stories(work_id, sort_order);
     CREATE INDEX IF NOT EXISTS idx_versions_story ON story_versions(story_id, version_number);
     CREATE INDEX IF NOT EXISTS idx_comments_story ON comments(story_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_comments_status ON comments(status, created_at);
     CREATE INDEX IF NOT EXISTS idx_comment_replies_comment ON comment_replies(comment_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_story_ratings_story ON story_ratings(story_id, score);
+    CREATE INDEX IF NOT EXISTS idx_story_ratings_work ON story_ratings(work_id, story_id);
     CREATE INDEX IF NOT EXISTS idx_share_links_work ON share_links(work_id, status);
   `);
 
@@ -243,7 +258,19 @@ export async function createChapter(workId, { title, sortOrder = 0 }) {
 
 export async function listStoriesForAdmin(workId) {
   return all(`
-    SELECT stories.*, chapters.title AS chapter_title
+    SELECT
+      stories.*,
+      chapters.title AS chapter_title,
+      (
+        SELECT COUNT(*)
+        FROM story_ratings
+        WHERE story_ratings.story_id = stories.id
+      ) AS rating_count,
+      (
+        SELECT ROUND(AVG(score), 2)
+        FROM story_ratings
+        WHERE story_ratings.story_id = stories.id
+      ) AS rating_average
     FROM stories
     LEFT JOIN chapters ON chapters.id = stories.chapter_id
     WHERE stories.work_id = ? AND stories.deleted_at IS NULL
@@ -627,6 +654,85 @@ export async function updateCommentStatus(commentId, status) {
   `, [status, commentId]);
 }
 
+export async function upsertStoryRating({
+  workId,
+  storyId,
+  storyVersionId,
+  readerId,
+  score
+}) {
+  const normalizedScore = Number(score);
+  if (![1, 2, 3].includes(normalizedScore)) {
+    throw new Error("rating score must be 1, 2, or 3");
+  }
+
+  const now = nowIso();
+  const existing = await get(`
+    SELECT id
+    FROM story_ratings
+    WHERE story_id = ? AND reader_id = ?
+  `, [storyId, readerId]);
+
+  if (existing) {
+    await run(`
+      UPDATE story_ratings
+      SET work_id = ?,
+          story_version_id = ?,
+          score = ?,
+          updated_at = ?
+      WHERE id = ?
+    `, [workId, storyVersionId, normalizedScore, now, existing.id]);
+    return existing.id;
+  }
+
+  const id = makeId("rating");
+  await run(`
+    INSERT INTO story_ratings (
+      id,
+      work_id,
+      story_id,
+      story_version_id,
+      reader_id,
+      score,
+      created_at,
+      updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `, [id, workId, storyId, storyVersionId, readerId, normalizedScore, now, now]);
+  return id;
+}
+
+export async function getReaderStoryRating(storyId, readerId) {
+  return get(`
+    SELECT *
+    FROM story_ratings
+    WHERE story_id = ? AND reader_id = ?
+  `, [storyId, readerId]);
+}
+
+export async function getStoryRatingSummary(storyId) {
+  const summary = await get(`
+    SELECT
+      COUNT(*) AS rating_count,
+      ROUND(AVG(score), 2) AS rating_average,
+      SUM(CASE WHEN score = 1 THEN 1 ELSE 0 END) AS score_1_count,
+      SUM(CASE WHEN score = 2 THEN 1 ELSE 0 END) AS score_2_count,
+      SUM(CASE WHEN score = 3 THEN 1 ELSE 0 END) AS score_3_count
+    FROM story_ratings
+    WHERE story_id = ?
+  `, [storyId]);
+
+  return {
+    rating_count: Number(summary?.rating_count || 0),
+    rating_average: summary?.rating_average === null || summary?.rating_average === undefined
+      ? null
+      : Number(summary.rating_average),
+    score_1_count: Number(summary?.score_1_count || 0),
+    score_2_count: Number(summary?.score_2_count || 0),
+    score_3_count: Number(summary?.score_3_count || 0)
+  };
+}
+
 export async function exportSnapshot() {
   return {
     exportedAt: nowIso(),
@@ -639,7 +745,8 @@ export async function exportSnapshot() {
       FROM share_links
     `),
     comments: await all("SELECT * FROM comments"),
-    commentReplies: await all("SELECT * FROM comment_replies")
+    commentReplies: await all("SELECT * FROM comment_replies"),
+    storyRatings: await all("SELECT * FROM story_ratings")
   };
 }
 

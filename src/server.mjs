@@ -18,8 +18,10 @@ import {
   getComment,
   getCommentReply,
   getCurrentVersion,
+  getReaderStoryRating,
   getShareByToken,
   getStory,
+  getStoryRatingSummary,
   getWork,
   initDb,
   issueShareLink,
@@ -39,6 +41,7 @@ import {
   updateCommentReply,
   updateCommentReplyByReader,
   updateCommentStatus,
+  upsertStoryRating,
   updateStoryDraft,
   updateWork
 } from "./db.mjs";
@@ -286,11 +289,12 @@ async function routeAdmin(req, res, url, pathname) {
 
 async function routeReader(req, res, url, pathname) {
   const replyMatch = pathname.match(/^\/s\/([^/]+)\/comment-replies\/([^/]+)\/(edit|delete)$/);
+  const ratingMatch = pathname.match(/^\/s\/([^/]+)\/stories\/([^/]+)\/rating$/);
   const match = pathname.match(/^\/s\/([^/]+)(?:\/stories\/([^/]+))?(?:\/comments\/([^/]+)\/(edit|delete|replies))?$/);
-  if (!match && !replyMatch) return notFound(res);
+  if (!match && !replyMatch && !ratingMatch) return notFound(res);
 
-  const token = replyMatch ? replyMatch[1] : match[1];
-  const storyId = match?.[2] || null;
+  const token = replyMatch ? replyMatch[1] : ratingMatch ? ratingMatch[1] : match[1];
+  const storyId = ratingMatch?.[2] || match?.[2] || null;
   const commentId = match?.[3] || null;
   const commentAction = match?.[4] || null;
   const replyId = replyMatch?.[2] || null;
@@ -342,6 +346,32 @@ async function routeReader(req, res, url, pathname) {
 
   if (storyId && !commentId && req.method === "GET") {
     return renderReaderStory(req, res, url, token, share, storyId, readerId);
+  }
+
+  if (ratingMatch && req.method === "POST") {
+    const form = await readForm(req);
+    const story = await getReadableStory(share.work_id, storyId);
+    if (!story) return notFound(res);
+    const version = await getCurrentVersion(storyId);
+    if (!version) return notFound(res);
+    const score = parseStoryRatingScore(form.get("score"));
+    if (!score) {
+      return forbidden(res, "評価を選択してください。");
+    }
+
+    await upsertStoryRating({
+      workId: share.work_id,
+      storyId,
+      storyVersionId: version.id,
+      readerId,
+      score
+    });
+    redirect(res, `/s/${token}/stories/${storyId}#story-rating`);
+    return;
+  }
+
+  if (ratingMatch) {
+    return notFound(res);
   }
 
   if (storyId && !commentId && req.method === "POST") {
@@ -520,6 +550,7 @@ async function renderAdminWork(req, res, workId, url) {
       <td>${escapeHtml(story.chapter_title || "章なし")}</td>
       <td><span class="status">${STORY_STATUS[story.status]}</span></td>
       <td>ver${story.current_version_number || "-"}</td>
+      <td>${renderCompactRatingSummary(story)}</td>
       <td>${story.sort_order}</td>
     </tr>
   `).join("");
@@ -605,8 +636,8 @@ async function renderAdminWork(req, res, workId, url) {
     <section class="panel">
       <h2>話</h2>
       <table>
-        <thead><tr><th>タイトル</th><th>章</th><th>状態</th><th>版</th><th>順</th></tr></thead>
-        <tbody>${storyRows || `<tr><td colspan="5">話がありません。</td></tr>`}</tbody>
+        <thead><tr><th>タイトル</th><th>章</th><th>状態</th><th>版</th><th>評価</th><th>順</th></tr></thead>
+        <tbody>${storyRows || `<tr><td colspan="6">話がありません。</td></tr>`}</tbody>
       </table>
     </section>
 
@@ -631,6 +662,7 @@ async function renderAdminStory(req, res, storyId, url) {
   const chapters = await listChapters(story.work_id);
   const versions = await listVersions(story.id);
   const comments = await listCommentsForAdmin({ storyId: story.id });
+  const ratingSummary = await getStoryRatingSummary(story.id);
   const rendered = renderNovelMarkup(story.body_draft || "");
   const published = url.searchParams.get("published");
   const saved = url.searchParams.get("saved");
@@ -705,6 +737,14 @@ async function renderAdminStory(req, res, storyId, url) {
           `).join("") || `<tr><td colspan="3">まだ公開版がありません。</td></tr>`}
         </tbody>
       </table>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <h2>星評価</h2>
+        <span class="status">${ratingSummary.rating_count}件</span>
+      </div>
+      ${renderAdminStoryRatingSummary(ratingSummary)}
     </section>
 
     <section class="panel">
@@ -795,6 +835,88 @@ async function renderAdminCommentTable(
   `;
 }
 
+function renderReaderStoryRating(token, story, readerRating, ratingSummary) {
+  const currentScore = Number(readerRating?.score || 0);
+  const options = [1, 2, 3].map((score) => `
+    <label class="star-rating-option ${currentScore === score ? "selected" : ""}">
+      <input type="radio" name="score" value="${score}" ${currentScore === score ? "checked" : ""} required>
+      <span class="star-rating-stars" aria-hidden="true">${renderStars(score, 3)}</span>
+      <span class="star-rating-label">${score}</span>
+    </label>
+  `).join("");
+
+  return `
+    <section class="story-rating-panel" id="story-rating">
+      <div class="section-heading">
+        <h2>この話の評価</h2>
+        ${currentScore ? `<span class="status">送信済み ${renderStars(currentScore, 3)}</span>` : `<span class="status">未送信</span>`}
+      </div>
+      <form class="story-rating-form" method="post" action="/s/${token}/stories/${story.id}/rating">
+        <div class="star-rating-control" role="radiogroup" aria-label="三段階評価">
+          ${options}
+        </div>
+        <button class="primary" type="submit">${currentScore ? "評価を更新" : "評価を送信"}</button>
+      </form>
+      <p class="muted">${formatRatingSummaryText(ratingSummary)}</p>
+    </section>
+  `;
+}
+
+function renderCompactRatingSummary(story) {
+  const count = Number(story.rating_count || 0);
+  if (!count) return `<span class="muted">未評価</span>`;
+
+  const average = Number(story.rating_average || 0);
+  return `
+    <span class="rating-compact">
+      <span aria-hidden="true">${renderStars(Math.round(average), 3)}</span>
+      <span>${formatRatingAverage(average)} / ${count}件</span>
+    </span>
+  `;
+}
+
+function renderAdminStoryRatingSummary(summary) {
+  const count = Number(summary.rating_count || 0);
+  if (!count) {
+    return `<p class="muted">まだ評価はありません。</p>`;
+  }
+
+  const rows = [3, 2, 1].map((score) => {
+    const scoreCount = Number(summary[`score_${score}_count`] || 0);
+    const percent = count ? Math.round((scoreCount / count) * 100) : 0;
+    return `
+      <div class="rating-breakdown-row">
+        <span class="rating-breakdown-stars" aria-hidden="true">${renderStars(score, 3)}</span>
+        <div class="rating-breakdown-bar"><span style="inline-size: ${percent}%"></span></div>
+        <span>${scoreCount}件</span>
+      </div>
+    `;
+  }).join("");
+
+  return `
+    <div class="rating-summary">
+      <p><strong>平均 ${formatRatingAverage(summary.rating_average)} / 3</strong></p>
+      <div class="rating-breakdown">${rows}</div>
+    </div>
+  `;
+}
+
+function formatRatingSummaryText(summary) {
+  const count = Number(summary?.rating_count || 0);
+  if (!count) return "まだ評価はありません。";
+  return `平均 ${formatRatingAverage(summary.rating_average)} / 3、${count}件の評価`;
+}
+
+function formatRatingAverage(value) {
+  const number = Number(value || 0);
+  return number.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function renderStars(score, max) {
+  const count = Math.max(0, Math.min(max, Number(score) || 0));
+  return `${"★".repeat(count)}${"☆".repeat(max - count)}`;
+}
+
 async function renderReaderWork(req, res, token, share) {
   const work = await getWork(share.work_id);
   const stories = await listStoriesForReader(share.work_id);
@@ -843,6 +965,8 @@ async function renderReaderStory(req, res, url, token, share, storyId, readerId)
 
   const rendered = renderNovelMarkup(version.body);
   const comments = await listReaderComments(story.id, readerId);
+  const readerRating = await getReaderStoryRating(story.id, readerId);
+  const ratingSummary = await getStoryRatingSummary(story.id);
   const commentParam = url.searchParams.get("comment") || "";
 
   renderHtml(res, 200, readerPage(story.title, `
@@ -895,6 +1019,7 @@ async function renderReaderStory(req, res, url, token, share, storyId, readerId)
             data-story-body
             data-plain="${escapeAttr(rendered.plainText)}"
           ><div class="story-body-content">${rendered.html}</div></article>
+          ${renderReaderStoryRating(token, story, readerRating, ratingSummary)}
           <aside class="comment-pane">
             <section class="comment-composer">
               <h2>コメント</h2>
@@ -1254,6 +1379,11 @@ function required(form, name) {
   const value = String(form.get(name) || "").trim();
   if (!value) throw new Error(`${name} is required`);
   return value;
+}
+
+function parseStoryRatingScore(value) {
+  const score = Number(value);
+  return [1, 2, 3].includes(score) ? score : null;
 }
 
 function readForm(req) {
