@@ -150,6 +150,7 @@ export async function initDb() {
       id TEXT PRIMARY KEY,
       work_id TEXT NOT NULL REFERENCES works(id),
       reader_id TEXT NOT NULL,
+      reader_name TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       UNIQUE (work_id, reader_id)
@@ -183,6 +184,7 @@ export async function initDb() {
   `);
 
   await migrateCommentReplies();
+  await migrateSurveyResponses();
   await seedIfEmpty();
 }
 
@@ -840,8 +842,9 @@ export async function getReaderSurveyAnswers(workId, readerId) {
   return { response, answers };
 }
 
-export async function saveSurveyResponse({ workId, readerId, questionIds, answers }) {
+export async function saveSurveyResponse({ workId, readerId, readerName = "", questionIds, answers }) {
   const now = nowIso();
+  const normalizedReaderName = String(readerName || "").trim().slice(0, 80);
   let response = await get(`
     SELECT *
     FROM survey_responses
@@ -851,16 +854,17 @@ export async function saveSurveyResponse({ workId, readerId, questionIds, answer
   if (response) {
     await run(`
       UPDATE survey_responses
-      SET updated_at = ?
+      SET reader_name = ?,
+          updated_at = ?
       WHERE id = ?
-    `, [now, response.id]);
+    `, [normalizedReaderName, now, response.id]);
   } else {
     const id = makeId("surveyres");
     await run(`
-      INSERT INTO survey_responses (id, work_id, reader_id, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?)
-    `, [id, workId, readerId, now, now]);
-    response = { id, work_id: workId, reader_id: readerId };
+      INSERT INTO survey_responses (id, work_id, reader_id, reader_name, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `, [id, workId, readerId, normalizedReaderName, now, now]);
+    response = { id, work_id: workId, reader_id: readerId, reader_name: normalizedReaderName };
   }
 
   const answeredQuestionIds = new Set(answers.map((answer) => answer.questionId));
@@ -989,6 +993,11 @@ async function migrateCommentReplies() {
   await addColumnIfMissing(columns, "sender_name", "ALTER TABLE comment_replies ADD COLUMN sender_name TEXT NOT NULL DEFAULT '投稿者'");
   await addColumnIfMissing(columns, "reader_id", "ALTER TABLE comment_replies ADD COLUMN reader_id TEXT");
   await addColumnIfMissing(columns, "edited_at", "ALTER TABLE comment_replies ADD COLUMN edited_at TEXT");
+}
+
+async function migrateSurveyResponses() {
+  const columns = (await all("PRAGMA table_info(survey_responses)")).map((column) => column.name);
+  await addColumnIfMissing(columns, "reader_name", "ALTER TABLE survey_responses ADD COLUMN reader_name TEXT NOT NULL DEFAULT ''");
 }
 
 async function addColumnIfMissing(columns, columnName, sql) {

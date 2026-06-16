@@ -397,6 +397,7 @@ async function routeReader(req, res, url, pathname) {
     await saveSurveyResponse({
       workId: share.work_id,
       readerId,
+      readerName: form.get("reader_name") || "",
       questionIds: questions.map((question) => question.id),
       answers
     });
@@ -977,7 +978,7 @@ async function renderAdminSurveyResponses(questions, responses) {
     return `
       <tr>
         <td>
-          <strong>${escapeHtml(shortReaderId(response.reader_id))}</strong>
+          <strong>${escapeHtml(surveyResponseName(response))}</strong>
           <p class="muted">${formatDate(response.updated_at)}</p>
         </td>
         ${questions.map((question) => `
@@ -1039,6 +1040,10 @@ function renderReaderWorkSurvey(token, questions, surveyState) {
         <span class="status">${answered ? "回答済み" : "未回答"}</span>
       </div>
       <form class="work-survey-form" method="post" action="/s/${token}/survey">
+        <label class="survey-question">
+          名前（任意）
+          <input name="reader_name" value="${escapeAttr(surveyState.response?.reader_name || "")}" maxlength="80">
+        </label>
         ${questions.map((question) => renderReaderSurveyQuestion(question, answerByQuestion.get(question.id))).join("")}
         <button class="primary" type="submit">${answered ? "回答を更新" : "回答を送信"}</button>
       </form>
@@ -1189,6 +1194,11 @@ function shortReaderId(readerId) {
   const value = String(readerId || "");
   const suffix = value.replace(/^reader_/, "").slice(-6);
   return suffix ? `読者 ${suffix}` : "読者";
+}
+
+function surveyResponseName(response) {
+  const name = String(response?.reader_name || "").trim();
+  return name || shortReaderId(response?.reader_id);
 }
 
 function formatSurveyNumber(value) {
