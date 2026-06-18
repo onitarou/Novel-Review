@@ -1197,11 +1197,16 @@ button.danger:hover {
 
   .reader-toolbar {
     align-items: start;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
     display: grid;
     gap: 0.65rem;
     grid-template-columns: auto minmax(0, 1fr) auto;
-    position: relative;
-    z-index: 45;
+    margin-top: -0.75rem;
+    padding: 0.75rem 0 0.65rem;
+    position: sticky;
+    top: 0;
+    z-index: 65;
   }
 
   .reader-toolbar [data-reader-menu-toggle] {
