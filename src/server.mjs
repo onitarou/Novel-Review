@@ -1376,7 +1376,7 @@ function readerSidebar(token, stories, activeStoryId = null) {
   return `
     <aside class="reader-sidebar" id="reader-navigation" data-reader-sidebar>
       <div class="reader-sidebar-header">
-        <a class="site-title" href="/s/${token}">小説共有</a>
+        <a class="site-title" href="/s/${token}">作品情報</a>
         <button class="reader-sidebar-close" type="button" data-reader-menu-close aria-label="話一覧を閉じる">
           <span aria-hidden="true">&times;</span>
         </button>
